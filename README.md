@@ -28,11 +28,14 @@ curl http://127.0.0.1:18080/api/v1/records
 
 ## Нагрузочный тест
 
-Тест использует [k6](https://grafana.com/docs/k6/latest/). Он создаёт запись, затем читает список; пороги: ошибок меньше 1%, p95 меньше 500 мс.
+Тест использует [k6](https://grafana.com/docs/k6/latest/). Он создаёт запись и читает список; пороги: ошибок меньше 1%, p95 меньше 500 мс. Профиль `standard` предназначен для быстрого демо. `stress` создаёт 256-байтные записи, поднимается до 20 VU, держит их 2 минуты и делает два `SELECT` на каждый `INSERT`.
 
 ```bash
 # локально
 BASE_URL=http://127.0.0.1:18080 k6 run k6/load-test.js
+
+# усиленная нагрузка на API и PostgreSQL
+LOAD_PROFILE=stress BASE_URL=http://127.0.0.1:18080 k6 run k6/load-test.js
 
 # через внешний Ingress
 BASE_URL=https://api.example.com k6 run k6/load-test.js

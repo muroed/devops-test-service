@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -31,12 +32,19 @@ type loadRequest struct {
 	ValueSizeBytes  int `json:"value_size_bytes"`
 }
 
+type cpuLoadRequest struct {
+	Workers         int `json:"workers"`
+	DurationSeconds int `json:"duration_seconds"`
+}
+
 type repository struct {
-	pool        *pgxpool.Pool
-	schemaMu    sync.Mutex
-	schemaReady bool
-	loadMu      sync.Mutex
-	loadRunning bool
+	pool           *pgxpool.Pool
+	schemaMu       sync.Mutex
+	schemaReady    bool
+	loadMu         sync.Mutex
+	loadRunning    bool
+	cpuLoadMu      sync.Mutex
+	cpuLoadRunning bool
 }
 
 func main() {
@@ -59,6 +67,7 @@ func main() {
 	mux.HandleFunc("POST /api/v1/records", createRecord(&repo))
 	mux.HandleFunc("GET /api/v1/records", listRecords(&repo))
 	mux.HandleFunc("POST /api/v1/load", startLoad(&repo))
+	mux.HandleFunc("POST /api/v1/cpu-load", startCPULoad(&repo))
 
 	server := &http.Server{
 		Addr:              env("HTTP_ADDR", ":8080"),
@@ -73,6 +82,56 @@ func main() {
 		slog.Error("server stopped", "error", err)
 		os.Exit(1)
 	}
+}
+
+func startCPULoad(repo *repository) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		request := cpuLoadRequest{Workers: 1, DurationSeconds: 30}
+		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 256))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&request); err != nil || request.Workers < 1 || request.Workers > 64 || request.DurationSeconds < 1 || request.DurationSeconds > 300 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "workers: 1-64, duration_seconds: 1-300"})
+			return
+		}
+
+		repo.cpuLoadMu.Lock()
+		if repo.cpuLoadRunning {
+			repo.cpuLoadMu.Unlock()
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "CPU load test is already running"})
+			return
+		}
+		repo.cpuLoadRunning = true
+		repo.cpuLoadMu.Unlock()
+
+		go repo.runCPULoad(request)
+		writeJSON(w, http.StatusAccepted, map[string]any{"status": "started", "workers": request.Workers, "duration_seconds": request.DurationSeconds})
+	}
+}
+
+func (repo *repository) runCPULoad(request cpuLoadRequest) {
+	defer func() {
+		repo.cpuLoadMu.Lock()
+		repo.cpuLoadRunning = false
+		repo.cpuLoadMu.Unlock()
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(request.DurationSeconds)*time.Second)
+	defer cancel()
+	var workers sync.WaitGroup
+	for worker := 0; worker < request.Workers; worker++ {
+		workers.Add(1)
+		go func(worker int) {
+			defer workers.Done()
+			var checksum uint64
+			for iteration := 0; ctx.Err() == nil; iteration++ {
+				digest := sha256.Sum256([]byte(fmt.Sprintf("cpu-load-%d-%d", worker, iteration)))
+				checksum += uint64(digest[0])
+			}
+			slog.Debug("CPU load worker completed", "worker", worker, "checksum", checksum)
+		}(worker)
+	}
+	workers.Wait()
+	slog.Info("CPU load test completed", "workers", request.Workers, "duration_seconds", request.DurationSeconds)
 }
 
 func startLoad(repo *repository) http.HandlerFunc {

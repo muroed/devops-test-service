@@ -9,6 +9,7 @@
 | `POST` | `/api/v1/records` | Создаёт запись: `{"value":"text"}`; ответ `201` |
 | `GET` | `/api/v1/records` | Возвращает до 100 последних записей |
 | `POST` | `/api/v1/load` | Запускает ограниченную фоновую нагрузку: `INSERT` + `SELECT count(*)` |
+| `POST` | `/api/v1/cpu-load` | Запускает ограниченную фоновую нагрузку на CPU без PostgreSQL |
 | `GET` | `/healthz` | Проверка процесса |
 
 ## Локальный запуск
@@ -35,6 +36,16 @@ curl http://127.0.0.1:18080/api/v1/records
 curl -X POST http://127.0.0.1:18080/api/v1/load \
   -H 'Content-Type: application/json' \
   -d '{"workers":20,"duration_seconds":120,"value_size_bytes":512}'
+```
+
+## Нагрузка на CPU без БД
+
+`POST /api/v1/cpu-load` запускает CPU-bound вычисления SHA-256 без сетевых вызовов и без PostgreSQL. Лимиты: до 64 воркеров и 300 секунд; параллельный вызов вернёт `409`.
+
+```bash
+curl -X POST http://127.0.0.1:18080/api/v1/cpu-load \
+  -H 'Content-Type: application/json' \
+  -d '{"workers":4,"duration_seconds":60}'
 ```
 
 ## Нагрузочный тест

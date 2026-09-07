@@ -22,7 +22,9 @@ curl -X POST http://localhost:8080/api/v1/records \
 curl http://localhost:8080/api/v1/records
 ```
 
-В Kubernetes приложение слушает HTTP на порту `8080`. TLS завершают Ingress NGINX и cert-manager; `Service` должен направлять HTTP-трафик на `targetPort: 8080`. `DATABASE_URL` обязателен и не должен попадать в Git.
+В Kubernetes приложение слушает HTTP на порту `8080`. TLS завершают Ingress NGINX и cert-manager; `Service` должен направлять HTTP-трафик на `targetPort: 8080`.
+
+Приложение стартует и отвечает `200` на `/healthz`, даже если PostgreSQL ещё не поднят или `DATABASE_URL` не задан. В этом состоянии эндпоинты записей корректно вернут `503 database unavailable`; после запуска БД сервис автоматически попробует подключиться снова на следующем запросе.
 
 ## Нагрузочный тест
 
@@ -34,6 +36,9 @@ BASE_URL=http://localhost:8080 k6 run k6/load-test.js
 
 # через внешний Ingress
 BASE_URL=https://api.example.com k6 run k6/load-test.js
+
+# только доступность API, БД не требуется
+TEST_MODE=health BASE_URL=http://localhost:8080 k6 run k6/load-test.js
 ```
 
 ## GitHub Container Registry
@@ -41,7 +46,7 @@ BASE_URL=https://api.example.com k6 run k6/load-test.js
 После создания репозитория и push в `main`, workflow публикует образ в GHCR:
 
 ```text
-ghcr.io/<github-owner>/postgres-api:main
+ghcr.io/<github-owner>/devops-test-service:main
 ```
 
 Для тегов `v*` публикуется тег версии и SHA. После первого запуска workflow откройте **Packages → package settings** и при необходимости измените видимость пакета.

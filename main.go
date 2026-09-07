@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -22,35 +23,31 @@ type createRequest struct {
 	Value string `json:"value"`
 }
 
+type repository struct {
+	pool        *pgxpool.Pool
+	schemaMu    sync.Mutex
+	schemaReady bool
+}
+
 func main() {
 	ctx := context.Background()
-	databaseURL := requiredEnv("DATABASE_URL")
-	pool, err := pgxpool.New(ctx, databaseURL)
-	if err != nil {
-		slog.Error("open database pool", "error", err)
-		os.Exit(1)
-	}
-	defer pool.Close()
-
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	if err := pool.Ping(ctx); err != nil {
-		slog.Error("ping database", "error", err)
-		os.Exit(1)
-	}
-	if _, err := pool.Exec(ctx, `CREATE TABLE IF NOT EXISTS records (
-		id BIGSERIAL PRIMARY KEY,
-		value TEXT NOT NULL,
-		created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-	)`); err != nil {
-		slog.Error("create schema", "error", err)
-		os.Exit(1)
+	var repo repository
+	if databaseURL := os.Getenv("DATABASE_URL"); databaseURL != "" {
+		pool, err := pgxpool.New(ctx, databaseURL)
+		if err != nil {
+			slog.Error("configure database pool", "error", err)
+		} else {
+			repo.pool = pool
+			defer pool.Close()
+		}
+	} else {
+		slog.Warn("DATABASE_URL is not set; record endpoints will return 503")
 	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", health)
-	mux.HandleFunc("POST /api/v1/records", createRecord(pool))
-	mux.HandleFunc("GET /api/v1/records", listRecords(pool))
+	mux.HandleFunc("POST /api/v1/records", createRecord(&repo))
+	mux.HandleFunc("GET /api/v1/records", listRecords(&repo))
 
 	server := &http.Server{
 		Addr:              env("HTTP_ADDR", ":8080"),
@@ -71,8 +68,13 @@ func health(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-func createRecord(pool *pgxpool.Pool) http.HandlerFunc {
+func createRecord(repo *repository) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if err := repo.ensureSchema(r.Context()); err != nil {
+			slog.Error("database unavailable", "error", err)
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "database unavailable"})
+			return
+		}
 		var request createRequest
 		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024))
 		decoder.DisallowUnknownFields()
@@ -85,7 +87,7 @@ func createRecord(pool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 		var result record
-		err := pool.QueryRow(r.Context(), `INSERT INTO records (value) VALUES ($1) RETURNING id, value, created_at`, request.Value).Scan(&result.ID, &result.Value, &result.CreatedAt)
+		err := repo.pool.QueryRow(r.Context(), `INSERT INTO records (value) VALUES ($1) RETURNING id, value, created_at`, request.Value).Scan(&result.ID, &result.Value, &result.CreatedAt)
 		if err != nil {
 			slog.Error("insert record", "error", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "database error"})
@@ -95,9 +97,14 @@ func createRecord(pool *pgxpool.Pool) http.HandlerFunc {
 	}
 }
 
-func listRecords(pool *pgxpool.Pool) http.HandlerFunc {
+func listRecords(repo *repository) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		rows, err := pool.Query(r.Context(), `SELECT id, value, created_at FROM records ORDER BY id DESC LIMIT 100`)
+		if err := repo.ensureSchema(r.Context()); err != nil {
+			slog.Error("database unavailable", "error", err)
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "database unavailable"})
+			return
+		}
+		rows, err := repo.pool.Query(r.Context(), `SELECT id, value, created_at FROM records ORDER BY id DESC LIMIT 100`)
 		if err != nil {
 			slog.Error("select records", "error", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "database error"})
@@ -121,6 +128,26 @@ func listRecords(pool *pgxpool.Pool) http.HandlerFunc {
 	}
 }
 
+func (repo *repository) ensureSchema(ctx context.Context) error {
+	if repo.pool == nil {
+		return errors.New("DATABASE_URL is not configured")
+	}
+	repo.schemaMu.Lock()
+	defer repo.schemaMu.Unlock()
+	if repo.schemaReady {
+		return nil
+	}
+	if _, err := repo.pool.Exec(ctx, `CREATE TABLE IF NOT EXISTS records (
+		id BIGSERIAL PRIMARY KEY,
+		value TEXT NOT NULL,
+		created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+	)`); err != nil {
+		return err
+	}
+	repo.schemaReady = true
+	return nil
+}
+
 func logging(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
@@ -138,12 +165,4 @@ func env(key, fallback string) string {
 		return value
 	}
 	return fallback
-}
-func requiredEnv(key string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
-	}
-	slog.Error("missing required environment variable", "name", key)
-	os.Exit(1)
-	return ""
 }

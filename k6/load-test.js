@@ -4,6 +4,12 @@ import { Trend } from 'k6/metrics';
 
 const writeLatency = new Trend('write_latency', true);
 const readLatency = new Trend('read_latency', true);
+const healthLatency = new Trend('health_latency', true);
+const testMode = __ENV.TEST_MODE || 'api';
+
+if (!['api', 'health'].includes(testMode)) {
+  throw new Error(`TEST_MODE must be "api" or "health", got "${testMode}"`);
+}
 
 export const options = {
   scenarios: {
@@ -15,6 +21,14 @@ export const options = {
 const baseURL = __ENV.BASE_URL || 'http://localhost:8080';
 
 export default function () {
+  if (testMode === 'health') {
+    const health = http.get(`${baseURL}/healthz`, { tags: { endpoint: 'health' } });
+    healthLatency.add(health.timings.duration);
+    check(health, { 'healthz returns 200': (response) => response.status === 200 });
+    sleep(0.2);
+    return;
+  }
+
   const payload = JSON.stringify({ value: `load-test-vu-${__VU}-iter-${__ITER}` });
   const write = http.post(`${baseURL}/api/v1/records`, payload, { headers: { 'Content-Type': 'application/json' }, tags: { endpoint: 'write' } });
   writeLatency.add(write.timings.duration);

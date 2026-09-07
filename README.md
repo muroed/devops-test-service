@@ -16,10 +16,10 @@
 
 ```bash
 docker compose up --build -d
-curl http://localhost:8080/healthz
-curl -X POST http://localhost:8080/api/v1/records \
+curl http://127.0.0.1:18080/healthz
+curl -X POST http://127.0.0.1:18080/api/v1/records \
   -H 'Content-Type: application/json' -d '{"value":"first record"}'
-curl http://localhost:8080/api/v1/records
+curl http://127.0.0.1:18080/api/v1/records
 ```
 
 В Kubernetes приложение слушает HTTP на порту `8080`. TLS завершают Ingress NGINX и cert-manager; `Service` должен направлять HTTP-трафик на `targetPort: 8080`.
@@ -32,13 +32,13 @@ curl http://localhost:8080/api/v1/records
 
 ```bash
 # локально
-BASE_URL=http://localhost:8080 k6 run k6/load-test.js
+BASE_URL=http://127.0.0.1:18080 k6 run k6/load-test.js
 
 # через внешний Ingress
 BASE_URL=https://api.example.com k6 run k6/load-test.js
 
 # только доступность API, БД не требуется
-TEST_MODE=health BASE_URL=http://localhost:8080 k6 run k6/load-test.js
+TEST_MODE=health BASE_URL=http://127.0.0.1:18080 k6 run k6/load-test.js
 ```
 
 ## GitHub Container Registry

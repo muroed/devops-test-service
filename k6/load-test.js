@@ -18,7 +18,7 @@ export const options = {
   thresholds: { http_req_failed: ['rate<0.01'], http_req_duration: ['p(95)<500'] },
 };
 
-const baseURL = __ENV.BASE_URL || 'http://localhost:8080';
+const baseURL = __ENV.BASE_URL || 'http://127.0.0.1:18080';
 
 export default function () {
   if (testMode === 'health') {

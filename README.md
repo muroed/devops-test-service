@@ -64,6 +64,10 @@ BASE_URL=https://api.example.com k6 run k6/load-test.js
 
 # только доступность API, БД не требуется
 TEST_MODE=health BASE_URL=http://127.0.0.1:18080 k6 run k6/load-test.js
+
+# проверка запуска CPU-нагрузки из API; к БД не обращается
+TEST_MODE=cpu-load CPU_WORKERS=4 CPU_DURATION_SECONDS=60 \
+  BASE_URL=http://127.0.0.1:18080 k6 run k6/load-test.js
 ```
 
 ## GitHub Container Registry

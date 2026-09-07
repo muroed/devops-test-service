@@ -53,16 +53,15 @@ func main() {
 	mux.HandleFunc("GET /api/v1/records", listRecords(pool))
 
 	server := &http.Server{
-		Addr:              env("HTTP_ADDR", ":8443"),
+		Addr:              env("HTTP_ADDR", ":8080"),
 		Handler:           logging(mux),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      15 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
-	certFile, keyFile := requiredEnv("TLS_CERT_FILE"), requiredEnv("TLS_KEY_FILE")
-	slog.Info("starting HTTPS server", "address", server.Addr)
-	if err := server.ListenAndServeTLS(certFile, keyFile); !errors.Is(err, http.ErrServerClosed) {
+	slog.Info("starting HTTP server", "address", server.Addr)
+	if err := server.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 		slog.Error("server stopped", "error", err)
 		os.Exit(1)
 	}

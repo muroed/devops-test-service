@@ -6,14 +6,13 @@ const writeLatency = new Trend('write_latency', true);
 const readLatency = new Trend('read_latency', true);
 
 export const options = {
-  insecureSkipTLSVerify: __ENV.INSECURE_TLS === 'true',
   scenarios: {
     api: { executor: 'ramping-vus', startVUs: 1, stages: [{ duration: '15s', target: 10 }, { duration: '30s', target: 10 }, { duration: '15s', target: 0 }], gracefulRampDown: '10s' },
   },
   thresholds: { http_req_failed: ['rate<0.01'], http_req_duration: ['p(95)<500'] },
 };
 
-const baseURL = __ENV.BASE_URL || 'https://localhost:8443';
+const baseURL = __ENV.BASE_URL || 'http://localhost:8080';
 
 export default function () {
   const payload = JSON.stringify({ value: `load-test-vu-${__VU}-iter-${__ITER}` });

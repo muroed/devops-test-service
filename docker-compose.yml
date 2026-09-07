@@ -19,13 +19,9 @@ services:
       postgres:
         condition: service_healthy
     ports:
-      - "8443:8443"
+      - "8080:8080"
     environment:
       DATABASE_URL: postgres://app:app@postgres:5432/app?sslmode=disable
-      TLS_CERT_FILE: /certs/tls.crt
-      TLS_KEY_FILE: /certs/tls.key
-    volumes:
-      - ./certs:/certs:ro
 
 volumes:
   postgres-data:

@@ -1,6 +1,6 @@
-# HTTPS PostgreSQL API
+# PostgreSQL API
 
-Минимальный сервис для технического собеседования: HTTPS API выполняет `INSERT` и `SELECT` в PostgreSQL. При запуске сам создаёт таблицу `records`.
+Минимальный сервис для технического собеседования: API выполняет `INSERT` и `SELECT` в PostgreSQL. При запуске сам создаёт таблицу `records`.
 
 ## API
 
@@ -10,32 +10,29 @@
 | `GET` | `/api/v1/records` | Возвращает до 100 последних записей |
 | `GET` | `/healthz` | Проверка процесса |
 
-## Локальный запуск с HTTPS
+## Локальный запуск
 
-Нужны Docker и Docker Compose. Для демо создайте самоподписанный сертификат (сертификаты не коммитятся):
+Нужны Docker и Docker Compose:
 
 ```bash
-mkdir certs
-openssl req -x509 -newkey rsa:2048 -nodes -days 7 \
-  -keyout certs/tls.key -out certs/tls.crt -subj '/CN=localhost'
 docker compose up --build -d
-curl --cacert certs/tls.crt https://localhost:8443/healthz
-curl --cacert certs/tls.crt -X POST https://localhost:8443/api/v1/records \
+curl http://localhost:8080/healthz
+curl -X POST http://localhost:8080/api/v1/records \
   -H 'Content-Type: application/json' -d '{"value":"first record"}'
-curl --cacert certs/tls.crt https://localhost:8443/api/v1/records
+curl http://localhost:8080/api/v1/records
 ```
 
-В реальном окружении передайте сертификат от ingress/cert-manager или секретом Kubernetes в пути из `TLS_CERT_FILE` и `TLS_KEY_FILE`. `DATABASE_URL` обязателен и не должен попадать в Git.
+В Kubernetes приложение слушает HTTP на порту `8080`. TLS завершают Ingress NGINX и cert-manager; `Service` должен направлять HTTP-трафик на `targetPort: 8080`. `DATABASE_URL` обязателен и не должен попадать в Git.
 
 ## Нагрузочный тест
 
-Тест использует [k6](https://grafana.com/docs/k6/latest/). Он по HTTPS создаёт запись, затем читает список; пороги: ошибок меньше 1%, p95 меньше 500 мс.
+Тест использует [k6](https://grafana.com/docs/k6/latest/). Он создаёт запись, затем читает список; пороги: ошибок меньше 1%, p95 меньше 500 мс.
 
 ```bash
-# самоподписанный сертификат только для локального прогона
-INSECURE_TLS=true BASE_URL=https://localhost:8443 k6 run k6/load-test.js
+# локально
+BASE_URL=http://localhost:8080 k6 run k6/load-test.js
 
-# production: TLS проверяется по умолчанию
+# через внешний Ingress
 BASE_URL=https://api.example.com k6 run k6/load-test.js
 ```
 
@@ -44,7 +41,7 @@ BASE_URL=https://api.example.com k6 run k6/load-test.js
 После создания репозитория и push в `main`, workflow публикует образ в GHCR:
 
 ```text
-ghcr.io/<github-owner>/https-postgres-api:main
+ghcr.io/<github-owner>/postgres-api:main
 ```
 
 Для тегов `v*` публикуется тег версии и SHA. После первого запуска workflow откройте **Packages → package settings** и при необходимости измените видимость пакета.

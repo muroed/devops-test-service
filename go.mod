@@ -1,4 +1,4 @@
-module github.com/OWNER/https-postgres-api
+module github.com/OWNER/postgres-api
 
 go 1.24.0
 

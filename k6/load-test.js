@@ -5,6 +5,7 @@ import { Counter, Trend } from 'k6/metrics';
 const writeLatency = new Trend('write_latency', true);
 const readLatency = new Trend('read_latency', true);
 const healthLatency = new Trend('health_latency', true);
+const payloadLatency = new Trend('payload_latency', true);
 const cpuLoadStarted = new Counter('cpu_load_started');
 const testMode = __ENV.TEST_MODE || 'api';
 const loadProfile = __ENV.LOAD_PROFILE || 'standard';
@@ -27,6 +28,7 @@ const cpuLoadRequests = envPositiveInt('CPU_LOAD_REQUESTS', 10, 100);
 const maximumDBWorkers = envPositiveInt('MAXIMUM_DB_WORKERS', 50, 200);
 const maximumCPUWorkers = envPositiveInt('MAXIMUM_CPU_WORKERS', 64, 256);
 const maximumDurationSeconds = envPositiveInt('MAXIMUM_DURATION_SECONDS', 300, 600);
+const maximumMemoryMegabytes = envPositiveInt('MAXIMUM_MEMORY_MEGABYTES', 512, 1024);
 
 const profiles = {
   standard: {
@@ -98,6 +100,14 @@ export function setup() {
   if (cpuLoad.status !== 202) {
     throw new Error(`CPU load endpoint returned ${cpuLoad.status}: ${cpuLoad.body}`);
   }
+  const memoryLoad = http.post(
+    `${baseURL}/api/v1/memory-load`,
+    JSON.stringify({ megabytes: maximumMemoryMegabytes, duration_seconds: maximumDurationSeconds }),
+    options,
+  );
+  if (memoryLoad.status !== 202) {
+    throw new Error(`memory load endpoint returned ${memoryLoad.status}: ${memoryLoad.body}`);
+  }
 }
 
 export default function () {
@@ -133,6 +143,11 @@ export default function () {
     const read = http.get(`${baseURL}/api/v1/records`, { tags: { endpoint: 'read' } });
     readLatency.add(read.timings.duration);
     check(read, { 'GET returns 200': (response) => response.status === 200, 'GET has items': (response) => Array.isArray(response.json('items')) });
+  }
+  if (loadProfile === 'maximum') {
+    const payload = http.get(`${baseURL}/api/v1/payload?size_bytes=1048576`, { tags: { endpoint: 'payload' } });
+    payloadLatency.add(payload.timings.duration);
+    check(payload, { 'payload returns 200': (response) => response.status === 200 });
   }
   sleep(profile.sleepSeconds);
 }

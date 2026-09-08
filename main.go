@@ -9,6 +9,8 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -37,14 +39,21 @@ type cpuLoadRequest struct {
 	DurationSeconds int `json:"duration_seconds"`
 }
 
+type memoryLoadRequest struct {
+	Megabytes       int `json:"megabytes"`
+	DurationSeconds int `json:"duration_seconds"`
+}
+
 type repository struct {
-	pool           *pgxpool.Pool
-	schemaMu       sync.Mutex
-	schemaReady    bool
-	loadMu         sync.Mutex
-	loadRunning    bool
-	cpuLoadMu      sync.Mutex
-	cpuLoadRunning bool
+	pool              *pgxpool.Pool
+	schemaMu          sync.Mutex
+	schemaReady       bool
+	loadMu            sync.Mutex
+	loadRunning       bool
+	cpuLoadMu         sync.Mutex
+	cpuLoadRunning    bool
+	memoryLoadMu      sync.Mutex
+	memoryLoadRunning bool
 }
 
 func main() {
@@ -68,6 +77,8 @@ func main() {
 	mux.HandleFunc("GET /api/v1/records", listRecords(&repo))
 	mux.HandleFunc("POST /api/v1/load", startLoad(&repo))
 	mux.HandleFunc("POST /api/v1/cpu-load", startCPULoad(&repo))
+	mux.HandleFunc("POST /api/v1/memory-load", startMemoryLoad(&repo))
+	mux.HandleFunc("GET /api/v1/payload", payload)
 
 	server := &http.Server{
 		Addr:              env("HTTP_ADDR", ":8080"),
@@ -82,6 +93,64 @@ func main() {
 		slog.Error("server stopped", "error", err)
 		os.Exit(1)
 	}
+}
+
+func startMemoryLoad(repo *repository) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		request := memoryLoadRequest{Megabytes: 128, DurationSeconds: 30}
+		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 256))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&request); err != nil || request.Megabytes < 1 || request.Megabytes > 1024 || request.DurationSeconds < 1 || request.DurationSeconds > 600 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "megabytes: 1-1024, duration_seconds: 1-600"})
+			return
+		}
+
+		repo.memoryLoadMu.Lock()
+		if repo.memoryLoadRunning {
+			repo.memoryLoadMu.Unlock()
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "memory load test is already running"})
+			return
+		}
+		repo.memoryLoadRunning = true
+		repo.memoryLoadMu.Unlock()
+
+		go repo.runMemoryLoad(request)
+		writeJSON(w, http.StatusAccepted, map[string]any{"status": "started", "megabytes": request.Megabytes, "duration_seconds": request.DurationSeconds})
+	}
+}
+
+func (repo *repository) runMemoryLoad(request memoryLoadRequest) {
+	defer func() {
+		repo.memoryLoadMu.Lock()
+		repo.memoryLoadRunning = false
+		repo.memoryLoadMu.Unlock()
+	}()
+
+	blocks := make([][]byte, request.Megabytes)
+	for index := range blocks {
+		blocks[index] = make([]byte, 1024*1024)
+		for offset := 0; offset < len(blocks[index]); offset += 4096 {
+			blocks[index][offset] = byte(index)
+		}
+	}
+	slog.Info("memory load allocated", "megabytes", request.Megabytes, "duration_seconds", request.DurationSeconds)
+	time.Sleep(time.Duration(request.DurationSeconds) * time.Second)
+	runtime.KeepAlive(blocks)
+	runtime.GC()
+	slog.Info("memory load test completed", "megabytes", request.Megabytes)
+}
+
+func payload(w http.ResponseWriter, r *http.Request) {
+	size := 1024
+	if value := r.URL.Query().Get("size_bytes"); value != "" {
+		parsed, err := strconv.Atoi(value)
+		if err != nil || parsed < 1 || parsed > 1024*1024 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "size_bytes must be an integer from 1 to 1048576"})
+			return
+		}
+		size = parsed
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"payload": strings.Repeat("x", size)})
 }
 
 func startCPULoad(repo *repository) http.HandlerFunc {

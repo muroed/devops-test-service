@@ -30,7 +30,7 @@ curl http://127.0.0.1:18080/api/v1/records
 
 ## Нагрузка из приложения
 
-`POST /api/v1/load` запускает один фоновый прогон: каждый воркер непрерывно выполняет `INSERT`, затем `SELECT count(*)` до окончания времени. Параллельный запуск вернёт `409`, чтобы нагрузка не стала неограниченной. Лимиты: до 50 воркеров, 300 секунд, до 900 байт полезной нагрузки записи. Используйте ручку только в тестовом окружении и ограничьте к ней доступ на уровне Ingress.
+`POST /api/v1/load` запускает один фоновый прогон: каждый воркер непрерывно выполняет `INSERT`, затем `SELECT count(*)` до окончания времени. Параллельный запуск вернёт `409`, чтобы нагрузка не стала неограниченной. Лимиты: до 200 воркеров, 600 секунд, до 900 байт полезной нагрузки записи. Используйте ручку только в тестовом окружении и ограничьте к ней доступ на уровне Ingress.
 
 ```bash
 curl -X POST http://127.0.0.1:18080/api/v1/load \
@@ -40,7 +40,7 @@ curl -X POST http://127.0.0.1:18080/api/v1/load \
 
 ## Нагрузка на CPU без БД
 
-`POST /api/v1/cpu-load` запускает CPU-bound вычисления SHA-256 без сетевых вызовов и без PostgreSQL. Лимиты: до 64 воркеров и 300 секунд; параллельный вызов вернёт `409`.
+`POST /api/v1/cpu-load` запускает CPU-bound вычисления SHA-256 без сетевых вызовов и без PostgreSQL. Лимиты: до 256 воркеров и 600 секунд; параллельный вызов вернёт `409`.
 
 ```bash
 curl -X POST http://127.0.0.1:18080/api/v1/cpu-load \
@@ -59,14 +59,29 @@ BASE_URL=http://127.0.0.1:18080 k6 run k6/load-test.js
 # усиленная нагрузка на API и PostgreSQL
 LOAD_PROFILE=stress BASE_URL=http://127.0.0.1:18080 k6 run k6/load-test.js
 
+# разрушительный сценарий: 500 внешних VU + 50 DB-воркеров + 64 CPU-воркера;
+# встроенная нагрузка длится 5 минут, внешний k6-тест — 10 минут.
+# Используйте только в изолированном тестовом окружении: он специально пытается положить сервис.
+LOAD_PROFILE=maximum ENABLE_DESTRUCTIVE_LOAD=true \
+  BASE_URL=http://127.0.0.1:18080 k6 run k6/load-test.js
+
+# после развёртывания текущей версии API с повышенными лимитами endpoint'ов
+LOAD_PROFILE=maximum ENABLE_DESTRUCTIVE_LOAD=true \
+  MAXIMUM_DB_WORKERS=200 MAXIMUM_CPU_WORKERS=256 MAXIMUM_DURATION_SECONDS=600 \
+  BASE_URL=http://127.0.0.1:18080 k6 run k6/load-test.js
+
 # через внешний Ingress
 BASE_URL=https://api.example.com k6 run k6/load-test.js
 
 # только доступность API, БД не требуется
 TEST_MODE=health BASE_URL=http://127.0.0.1:18080 k6 run k6/load-test.js
 
-# проверка запуска CPU-нагрузки из API; к БД не обращается
+# 10 запросов к CPU endpoint: один запускает нагрузку (202), остальные получают ожидаемый 409
 TEST_MODE=cpu-load CPU_WORKERS=4 CPU_DURATION_SECONDS=60 \
+  BASE_URL=http://127.0.0.1:18080 k6 run k6/load-test.js
+
+# изменить число вызовов (по умолчанию 10)
+TEST_MODE=cpu-load CPU_LOAD_REQUESTS=20 \
   BASE_URL=http://127.0.0.1:18080 k6 run k6/load-test.js
 ```
 

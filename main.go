@@ -89,8 +89,8 @@ func startCPULoad(repo *repository) http.HandlerFunc {
 		request := cpuLoadRequest{Workers: 1, DurationSeconds: 30}
 		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 256))
 		decoder.DisallowUnknownFields()
-		if err := decoder.Decode(&request); err != nil || request.Workers < 1 || request.Workers > 64 || request.DurationSeconds < 1 || request.DurationSeconds > 300 {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "workers: 1-64, duration_seconds: 1-300"})
+		if err := decoder.Decode(&request); err != nil || request.Workers < 1 || request.Workers > 256 || request.DurationSeconds < 1 || request.DurationSeconds > 600 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "workers: 1-256, duration_seconds: 1-600"})
 			return
 		}
 
@@ -143,8 +143,8 @@ func startLoad(repo *repository) http.HandlerFunc {
 		request := loadRequest{Workers: 5, DurationSeconds: 30, ValueSizeBytes: 128}
 		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024))
 		decoder.DisallowUnknownFields()
-		if err := decoder.Decode(&request); err != nil || request.Workers < 1 || request.Workers > 50 || request.DurationSeconds < 1 || request.DurationSeconds > 300 || request.ValueSizeBytes < 1 || request.ValueSizeBytes > 900 {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "workers: 1-50, duration_seconds: 1-300, value_size_bytes: 1-900"})
+		if err := decoder.Decode(&request); err != nil || request.Workers < 1 || request.Workers > 200 || request.DurationSeconds < 1 || request.DurationSeconds > 600 || request.ValueSizeBytes < 1 || request.ValueSizeBytes > 900 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "workers: 1-200, duration_seconds: 1-600, value_size_bytes: 1-900"})
 			return
 		}
 
